@@ -1,57 +1,60 @@
 # Telegram File-Sharing Bot (Local Development)
 
-This project is being built in small phases for local testing on Windows. It does not include Docker, cloud hosting, a VPS, or deployment configuration.
+This project is built and tested locally on Windows. It has no Docker, cloud hosting, VPS, or deployment setup.
 
-## Current status: Phase 1
+## Current status: Phases 4 and 5
 
-The bot can start locally and responds to `/start` and `/help`. Admin uploads, file links, deliveries, deletion, subscription checks, sessions, and the database are deliberately not implemented yet.
+Configured administrators can upload documents, videos, audio files, and animations. The bot stores the Telegram source-message reference and metadata in local SQLite, not file bytes. Each stored file now receives a random public ID and a Telegram share link.
 
-The selected framework is **aiogram 3.x**. It provides an asynchronous Telegram Bot API interface and clean routing for the handlers this bot will need. Its structure is a little more formal than a minimal bot library, but it makes the growing feature set easier to maintain.
+Opening a valid link now checks optional channel membership first, creates or reuses a 24-hour access session only after that check passes, copies the original Telegram message to the user, and schedules only the copied message for deletion. The original stored message is never deleted.
+
+The bot uses **aiogram 3.x** for async Telegram handling and SQLAlchemy 2.x with local SQLite. The database layer is structured so PostgreSQL can be introduced later without changing the bot features.
 
 ## Local setup on Windows
 
-1. Install [Python 3.12 or newer](https://www.python.org/downloads/). In PowerShell, confirm it:
+1. Install [Python 3.12 or newer](https://www.python.org/downloads/) and confirm it:
 
    ```powershell
    python --version
    ```
 
-2. Create and activate a virtual environment in the project folder:
+2. Create and activate a virtual environment:
 
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
    ```
 
-   If PowerShell blocks activation, run this once for the current window and retry:
+   If PowerShell blocks activation, run this once in the current PowerShell window, then retry:
 
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    ```
 
-3. Install the Phase 1 dependencies:
+3. Install dependencies:
 
    ```powershell
    python -m pip install --upgrade pip
    python -m pip install -r requirements.txt
    ```
 
-4. Create a bot through Telegram's **@BotFather**. Copy its token and keep it private.
+4. Create a bot using Telegram's **@BotFather**, then copy its token.
 
-5. Copy `.env.example` to a new `.env` file:
+5. Create your private local configuration:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-6. Open `.env` and set these values:
+6. Edit `.env` with your real values:
 
    ```dotenv
    BOT_TOKEN=your_real_token_from_botfather
    ADMIN_IDS=your_numeric_telegram_user_id
+   DATABASE_URL=sqlite+aiosqlite:///data/bot.db
    ```
 
-   `ADMIN_IDS` is reserved for Phase 2 but is useful to set now. You can obtain your numeric Telegram ID from a reputable ID bot, or we can cover it in the admin-upload phase.
+   `ADMIN_IDS` contains numeric Telegram account IDs, not `@usernames`. Use commas for multiple admins.
 
 7. Start the bot:
 
@@ -59,54 +62,97 @@ The selected framework is **aiogram 3.x**. It provides an asynchronous Telegram 
    python -m app
    ```
 
-8. Stop it with `Ctrl+C`.
+Stop it with `Ctrl+C`.
 
-## Phase 1 manual tests
+## Phase 4 and 5 manual tests
 
-### Test 1 — startup
+### Test 1 - upload and link generation
 
-Run:
+From an account in `ADMIN_IDS`, upload a supported file to the bot.
 
-```powershell
-python -m app
-```
+Expected: the bot replies with a Telegram URL beginning with `https://t.me/` and containing `?start=file_...`.
 
-Expected: the terminal logs that it authenticated as your bot and started polling. The token is never printed.
+### Test 2 - retrieve a link for your earlier upload
 
-### Test 2 — `/start`
-
-In Telegram, open a chat with your bot and send:
+If the file you uploaded in Phase 2 showed `Local record ID: 1`, send this command from an administrator account:
 
 ```text
-/start
+/link 1
 ```
 
-Expected: a welcome message saying this is the local-development bot.
+Expected: the bot returns that file's share link. This works because the Phase 3 startup migration gives existing records a public ID without removing their source reference.
 
-### Test 3 — `/help`
+### Test 3 - open a valid share link
 
-Send:
+Tap the generated link, choose your bot if Telegram asks, then press Start.
+
+Expected with `FORCE_SUBSCRIPTION_ENABLED=false`: the bot copies the requested file to your chat and sends a cleanup notice.
+
+### Test 4 - short deletion test
+
+Temporarily set `AUTO_DELETE_MINUTES=1` in `.env`, restart the bot, open a valid link, and wait about one minute.
+
+Expected: the user-facing copied message is deleted. The original admin upload and database record remain available. Restore `AUTO_DELETE_MINUTES=20` afterward.
+
+### Test 5 - force subscription
+
+Use a channel where the bot can check membership, then set:
+
+```dotenv
+FORCE_SUBSCRIPTION_ENABLED=true
+REQUIRED_CHANNEL_ID=-1001234567890
+REQUIRED_CHANNEL_USERNAME=your_channel_username
+```
+
+Restart the bot and open a link from an account that has not joined.
+
+Expected: the bot does not send the file or create a 24-hour access session. It shows Join and “I've Joined / Check Again” buttons.
+
+Join the channel and press “I've Joined / Check Again”.
+
+Expected: the check passes, a 24-hour session is created, and the file is copied. Another valid link within 24 hours reuses that session.
+
+### Test 6 - invalid link
+
+Send the bot a malformed command such as:
 
 ```text
-/help
+/start file_not-a-real-id
 ```
 
-Expected: a short list containing `/start` and `/help`.
+Expected: the bot says the share link is invalid. No file is sent.
 
-### Test 4 — invalid or missing token
+### Test 7 - unknown but well-formed ID
 
-Temporarily stop the bot, clear or change `BOT_TOKEN` in `.env`, then run it again.
+Send this example:
 
-Expected: it exits with a clear configuration or Telegram API error. Restore the real token afterward.
+```text
+/start file_AbCdEfGhIjKlMnOp
+```
+
+Expected: the bot says the link is invalid or the file no longer exists.
+
+## How share links work
+
+A public ID is generated with cryptographically secure random URL-safe characters. The stored link is conceptually:
+
+```text
+https://t.me/YourBotUsername?start=file_PUBLIC_ID
+```
+
+Telegram turns that URL into `/start file_PUBLIC_ID`. The bot validates the format and looks up the ID in SQLite before accepting it. It never trusts an arbitrary user-supplied ID as a Telegram file reference.
+
+## Stored metadata
+
+`stored_files` holds the original Telegram chat/message IDs, Telegram file identifiers, file metadata, a public ID, and creation time. The original source message remains on Telegram. Future user-facing copies will be separate messages, so their deletion cannot delete the original source.
 
 ## Configuration reference
 
-`BOT_TOKEN` is required now. The remaining settings are present to make later phases predictable:
-
 | Setting | Default | Used in |
 | --- | --- | --- |
-| `ADMIN_IDS` | empty | Phase 2 |
-| `DATABASE_URL` | local SQLite URL | Phase 6 foundation |
+| `BOT_TOKEN` | required | Phase 1 |
+| `ADMIN_IDS` | required | Phase 2 |
+| `DATABASE_URL` | `sqlite+aiosqlite:///data/bot.db` | Phase 2 |
 | `AUTO_DELETE_MINUTES` | `20` | Phase 4 |
 | `FORCE_SUBSCRIPTION_ENABLED` | `false` | Phase 5 |
 | `REQUIRED_CHANNEL_ID` | empty | Phase 5 |
