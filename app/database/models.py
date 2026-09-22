@@ -12,6 +12,18 @@ class Base(DeclarativeBase):
     """Base class for all database tables."""
 
 
+class User(Base):
+    """Telegram user activity tracked without storing private profile data."""
+
+    __tablename__ = "users"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
+
+
 class StoredFile(Base):
     """A Telegram source-message reference, not a downloaded file."""
 

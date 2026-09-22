@@ -15,6 +15,7 @@ from app.services.delivery_service import DeliveryService
 from app.services.file_service import FileService
 from app.services.link_service import LinkService
 from app.services.subscription_service import SubscriptionService
+from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 _CHECK_PREFIX = "check_sub:"
@@ -27,6 +28,7 @@ def build_start_router(
     access_service: AccessService,
     subscription_service: SubscriptionService,
     delivery_service: DeliveryService,
+    user_service: UserService,
 ) -> Router:
     """Create the complete Phase 4/5 access flow."""
     router = Router(name=__name__)
@@ -106,6 +108,11 @@ def build_start_router(
 
     @router.message(CommandStart())
     async def command_start(message: Message, command: CommandObject) -> None:
+        if message.from_user is not None:
+            try:
+                await user_service.record_seen(message.from_user.id, message.from_user.username)
+            except SQLAlchemyError:
+                logger.exception("Could not update user activity")
         public_id = link_service.parse_file_id(command.args)
         if command.args is None:
             await message.answer(
@@ -124,6 +131,10 @@ def build_start_router(
         await callback.answer()
         if callback.message is None or callback.from_user is None:
             return
+        try:
+            await user_service.record_seen(callback.from_user.id, callback.from_user.username)
+        except SQLAlchemyError:
+            logger.exception("Could not update user activity")
         public_id = link_service.parse_file_id("file_" + callback.data.removeprefix(_CHECK_PREFIX))
         if public_id is None:
             await callback.message.answer("This share link is invalid. Please request a new link.")

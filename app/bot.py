@@ -24,6 +24,7 @@ from app.services.deletion_service import DeletionService
 from app.services.file_service import FileService
 from app.services.link_service import LinkService
 from app.services.subscription_service import SubscriptionService
+from app.services.user_service import UserService
 
 
 def configure_logging() -> None:
@@ -57,6 +58,7 @@ async def run_bot() -> None:
         link_service = LinkService(bot_info.username or "")
         access_service = AccessService(database)
         delivery_service = DeliveryService(database, settings.auto_delete_minutes)
+        user_service = UserService(database)
         subscription_service = SubscriptionService(
             bot,
             settings.force_subscription_enabled,
@@ -74,9 +76,10 @@ async def run_bot() -> None:
                 access_service,
                 subscription_service,
                 delivery_service,
+                user_service,
             )
         )
-        dispatcher.include_router(build_admin_router(file_service, link_service, admin_ids))
+        dispatcher.include_router(build_admin_router(file_service, link_service, admin_ids, user_service))
         logger.info("Authenticated as @%s (id=%s). Starting polling.", bot_info.username, bot_info.id)
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     except TelegramAPIError as error:

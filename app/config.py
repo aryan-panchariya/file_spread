@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     force_subscription_enabled: bool = False
     required_channel_id: str | None = None
     required_channel_username: str | None = None
+    vplink_api_token: SecretStr | None = None
+    vplink_enabled: bool = False
 
     @field_validator("auto_delete_minutes")
     @classmethod
@@ -31,6 +33,12 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("AUTO_DELETE_MINUTES must be greater than zero.")
         return value
+
+    @model_validator(mode="after")
+    def validate_vplink_configuration(self) -> "Settings":
+        if self.vplink_enabled and not self.vplink_api_token:
+            raise ValueError("VPLINK_ENABLED=true requires VPLINK_API_TOKEN.")
+        return self
 
     @property
     def parsed_admin_ids(self) -> set[int]:

@@ -2,13 +2,13 @@
 
 This project is built and tested locally on Windows. It has no Docker, cloud hosting, VPS, or deployment setup.
 
-## Current status: Phases 4 and 5
+## Current status: complete local development version
 
 Configured administrators can upload documents, videos, audio files, and animations. The bot stores the Telegram source-message reference and metadata in local SQLite, not file bytes. Each stored file now receives a random public ID and a Telegram share link.
 
 Opening a valid link now checks optional channel membership first, creates or reuses a 24-hour access session only after that check passes, copies the original Telegram message to the user, and schedules only the copied message for deletion. The original stored message is never deleted.
 
-The bot uses **aiogram 3.x** for async Telegram handling and SQLAlchemy 2.x with local SQLite. The database layer is structured so PostgreSQL can be introduced later without changing the bot features.
+The bot uses **aiogram 3.x** for async Telegram handling and SQLAlchemy 2.x with local SQLite. The database layer is structured so PostgreSQL can be introduced later without changing the bot features. Users, access sessions, deliveries, and deletion status are persisted locally.
 
 ## Local setup on Windows
 
@@ -112,6 +112,16 @@ Join the channel and press “I've Joined / Check Again”.
 
 Expected: the check passes, a 24-hour session is created, and the file is copied. Another valid link within 24 hours reuses that session.
 
+## Automated checks
+
+Run from the project folder with the virtual environment active:
+
+```powershell
+pytest -q
+```
+
+These tests verify link validation, local SQLite storage, duplicate upload protection, 24-hour session reuse, and configurable delivery deletion timing.
+
 ### Test 6 - invalid link
 
 Send the bot a malformed command such as:
@@ -144,7 +154,7 @@ Telegram turns that URL into `/start file_PUBLIC_ID`. The bot validates the form
 
 ## Stored metadata
 
-`stored_files` holds the original Telegram chat/message IDs, Telegram file identifiers, file metadata, a public ID, and creation time. The original source message remains on Telegram. Future user-facing copies will be separate messages, so their deletion cannot delete the original source.
+`users` tracks Telegram ID, username, first/last seen, and status. `stored_files` holds the original Telegram chat/message IDs, Telegram file identifiers, file metadata, a public ID, and creation time. `access_sessions` tracks subscription-approved 24-hour sessions. `deliveries` tracks copied user-facing messages and their cleanup state. The original source message remains on Telegram; deleting a delivery cannot delete it.
 
 ## Configuration reference
 
@@ -152,7 +162,7 @@ Telegram turns that URL into `/start file_PUBLIC_ID`. The bot validates the form
 | --- | --- | --- |
 | `BOT_TOKEN` | required | Phase 1 |
 | `ADMIN_IDS` | required | Phase 2 |
-| `DATABASE_URL` | `sqlite+aiosqlite:///data/bot.db` | Phase 2 |
+| `DATABASE_URL` | `sqlite+aiosqlite:///data/bot.db` | Local database |
 | `AUTO_DELETE_MINUTES` | `20` | Phase 4 |
 | `FORCE_SUBSCRIPTION_ENABLED` | `false` | Phase 5 |
 | `REQUIRED_CHANNEL_ID` | empty | Phase 5 |

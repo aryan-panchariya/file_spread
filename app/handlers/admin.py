@@ -11,11 +11,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.file_service import FileService, IncomingFile
 from app.services.link_service import LinkService
+from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
 
-def build_admin_router(file_service: FileService, link_service: LinkService, admin_ids: set[int]) -> Router:
+def build_admin_router(file_service: FileService, link_service: LinkService, admin_ids: set[int], user_service: UserService) -> Router:
     router = Router(name=__name__)
 
     @router.message(Command("link"))
@@ -26,6 +27,10 @@ def build_admin_router(file_service: FileService, link_service: LinkService, adm
             await message.answer("This command is available to bot administrators only.")
             logger.warning("Rejected /link from non-admin user id=%s", getattr(sender, "id", None))
             return
+        try:
+            await user_service.record_seen(sender.id, sender.username)
+        except SQLAlchemyError:
+            logger.exception("Could not update admin activity")
         if command.args is None or not command.args.strip().isdigit():
             await message.answer("Usage: <code>/link LOCAL_RECORD_ID</code>\nExample: <code>/link 1</code>")
             return
@@ -47,6 +52,10 @@ def build_admin_router(file_service: FileService, link_service: LinkService, adm
             await message.answer("File uploads are available to bot administrators only.")
             logger.warning("Rejected file upload from non-admin user id=%s", getattr(sender, "id", None))
             return
+        try:
+            await user_service.record_seen(sender.id, sender.username)
+        except SQLAlchemyError:
+            logger.exception("Could not update admin activity")
         incoming_file = _extract_incoming_file(message)
         if incoming_file is None:
             logger.error("Upload filter matched but no supported file was found in message %s", message.message_id)
@@ -62,7 +71,7 @@ def build_admin_router(file_service: FileService, link_service: LinkService, adm
             await message.answer(
                 "File reference stored successfully.\n"
                 f"Share link: {link_service.build_file_link(stored_file)}\n\n"
-                "The link is valid now. File delivery will be enabled in Phase 4."
+                "The link is ready for user delivery."
             )
             logger.info("Stored admin upload record id=%s from chat=%s", stored_file.id, message.chat.id)
         else:
