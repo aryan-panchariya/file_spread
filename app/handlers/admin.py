@@ -12,12 +12,64 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.services.file_service import FileService, IncomingFile
 from app.services.link_service import LinkService
 from app.services.user_service import UserService
+from app.services.access_service import AccessService
 
 logger = logging.getLogger(__name__)
 
 
-def build_admin_router(file_service: FileService, link_service: LinkService, admin_ids: set[int], user_service: UserService) -> Router:
+def build_admin_router(
+    file_service: FileService,
+    link_service: LinkService,
+    admin_ids: set[int],
+    user_service: UserService,
+    access_service: AccessService,
+) -> Router:
     router = Router(name=__name__)
+    @router.message(Command("revoke"))
+    async def command_revoke(message: Message, command: CommandObject) -> None:
+        """Revoke all active 24-hour access sessions for a user."""
+        sender = message.from_user
+
+        if sender is None or sender.id not in admin_ids:
+            await message.answer("This command is available to bot administrators only.")
+            logger.warning(
+                "Rejected /revoke from non-admin user id=%s",
+                getattr(sender, "id", None),
+            )
+            return
+
+        if command.args is None or not command.args.strip().isdigit():
+            await message.answer(
+                "Usage: <code>/revoke USER_TELEGRAM_ID</code>\n"
+                "Example: <code>/revoke 8141130968</code>"
+            )
+            return
+
+        user_id = int(command.args.strip())
+
+        try:
+            revoked = await access_service.revoke_user_sessions(user_id)
+        except SQLAlchemyError:
+            logger.exception("Database error while revoking access for user id=%s", user_id)
+            await message.answer(
+                "I could not revoke that user's access because of a database error."
+            )
+            return
+
+        if revoked:
+            await message.answer(
+                f"✅ Revoked access for user <code>{user_id}</code>."
+            )
+            logger.info(
+                "Admin id=%s revoked %s access session(s) for user id=%s",
+                sender.id,
+                revoked,
+                user_id,
+            )
+        else:
+            await message.answer(
+                f"ℹ️ User <code>{user_id}</code> has no active access session."
+            )
 
     @router.message(Command("link"))
     async def command_link(message: Message, command: CommandObject) -> None:
